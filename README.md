@@ -34,7 +34,7 @@ A working Depth-Anything-V2 install
    [Python 3.10.8](https://www.python.org/downloads/release/python-3108/)
 
 2. **Install Git:**
-   [Git](https://git-scm.com/downloads).
+   [Git](https://git-scm.com/downloads)
 
 2. **Git Clone this repo:**
    git clone https://github.com/qseptq7qsept/ChromoStereoizer.git
