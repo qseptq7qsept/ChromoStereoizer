@@ -37,8 +37,6 @@ A working Depth-Anything-V2 install
    [Git](https://git-scm.com/downloads).
 
 2. **Git Clone this repo**
-   Create a Folder on your machine
-   Open a cmd
    git clone https://github.com/qseptq7qsept/ChromoStereoizer.git
 
 4. **Run the Installation Script:**  
