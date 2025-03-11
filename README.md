@@ -30,13 +30,13 @@ A working Depth-Anything-V2 install
 
 ### Windows
 
-1. **Install Python 3.10.8 or Newer**
-   [Python 3.10.8](https://www.python.org/downloads/release/python-3108/).
+1. **Install Python 3.10.8 or Newer:**
+   [Python 3.10.8](https://www.python.org/downloads/release/python-3108/)
 
-2. **Install Git**
+2. **Install Git:**
    [Git](https://git-scm.com/downloads).
 
-2. **Git Clone this repo**
+2. **Git Clone this repo:**
    git clone https://github.com/qseptq7qsept/ChromoStereoizer.git
 
 4. **Run the Installation Script:**  
