@@ -64,14 +64,14 @@ def apply_chromo_stereopsis(original_img: Image.Image, depth_img: Image.Image, t
     return Image.fromarray(output, mode="RGB")
 
 def pil_to_pixmap(im: Image.Image, max_size=(300, 300)) -> QPixmap:
-    """Convert a PIL image to QPixmap for thumbnail display without modifying the original image."""
     if im.mode != "RGB":
         im = im.convert("RGB")
-    # Create a copy for thumbnail creation so the original image remains unaltered
     thumbnail = im.copy()
     thumbnail.thumbnail(max_size, Image.Resampling.LANCZOS)
     data = thumbnail.tobytes("raw", "RGB")
-    qimg = QImage(data, thumbnail.width, thumbnail.height, QImage.Format_RGB888)
+    # Compute bytes per line: width * 3 (for RGB)
+    bytes_per_line = thumbnail.width * 3
+    qimg = QImage(data, thumbnail.width, thumbnail.height, bytes_per_line, QImage.Format_RGB888)
     return QPixmap.fromImage(qimg)
 
 class MainWindow(QMainWindow):
