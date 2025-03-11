@@ -14,7 +14,7 @@ _Generate Chromostereopsis images from Depth._
 
 ## Overview
 
-Generate Chromostereopsis images from Depth, using Depth-Anything-V2.
+Generate Chromostereopsis images from Depth, using [Depth-Anything-V2](https://github.com/DepthAnything/Depth-Anything-V2).
 
 ## Dependencies
 
