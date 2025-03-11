@@ -6,7 +6,7 @@ from PIL import Image
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QPushButton, 
                                QVBoxLayout, QHBoxLayout, QFileDialog, QLabel, QLineEdit, 
                                QMessageBox, QSlider, QGroupBox, QGridLayout)
-from PySide6.QtGui import QPixmap, QImage
+from PySide6.QtGui import QPixmap, QImage, QPalette, QColor
 from PySide6.QtCore import Qt
 from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
@@ -77,7 +77,7 @@ def pil_to_pixmap(im: Image.Image, max_size=(300, 300)) -> QPixmap:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("ChromoStereoizer v1.0 -q7")
+        self.setWindowTitle("ChromoStereoizer v1.1 -q7")
         self.resize(1200, 800)
 
         self.image_processor, self.model, self.device = load_model("vitl")
@@ -91,51 +91,71 @@ class MainWindow(QMainWindow):
 
         # Controls group
         controls_group = QGroupBox("Controls")
-        controls_layout = QGridLayout()
+        controls_layout = QVBoxLayout()
         controls_group.setLayout(controls_layout)
         main_layout.addWidget(controls_group)
 
+        # Top row for buttons and output folder info.
+        top_row = QHBoxLayout()
         self.select_button = QPushButton("Select Input Image")
         self.select_button.clicked.connect(self.select_image)
-        controls_layout.addWidget(self.select_button, 0, 0)
+        top_row.addWidget(self.select_button)
 
         self.folder_button = QPushButton("Select Output Folder")
         self.folder_button.clicked.connect(self.select_folder)
-        controls_layout.addWidget(self.folder_button, 0, 1)
+        top_row.addWidget(self.folder_button)
 
         self.folder_label = QLabel("No output folder selected")
-        controls_layout.addWidget(self.folder_label, 0, 2)
+        top_row.addWidget(self.folder_label)
+        controls_layout.addLayout(top_row)
 
+        # Filename input and Process Depth button.
+        row_two = QHBoxLayout()
         self.filename_edit = QLineEdit()
         self.filename_edit.setPlaceholderText("Enter output file name (without extension)")
-        controls_layout.addWidget(self.filename_edit, 1, 0, 1, 2)
+        row_two.addWidget(self.filename_edit)
 
-        # Slider for median threshold (% of 255)
+        self.process_depth_button = QPushButton("Process Depth")
+        self.process_depth_button.clicked.connect(self.process_depth_only)
+        row_two.addWidget(self.process_depth_button)
+        controls_layout.addLayout(row_two)
+
+        # Threshold slider row with numeric label.
+        threshold_row = QHBoxLayout()
+        threshold_desc = QLabel("Median threshold (% of 255):")
+        threshold_row.addWidget(threshold_desc)
         self.threshold_slider = QSlider(Qt.Horizontal)
         self.threshold_slider.setRange(1, 100)
         self.threshold_slider.setValue(50)
         self.threshold_slider.setTickInterval(10)
         self.threshold_slider.setTickPosition(QSlider.TicksBelow)
-        controls_layout.addWidget(QLabel("Median threshold (% of 255):"), 2, 0)
-        controls_layout.addWidget(self.threshold_slider, 2, 1)
+        self.threshold_slider.valueChanged.connect(self.update_threshold_label)
+        threshold_row.addWidget(self.threshold_slider)
+        self.threshold_value_label = QLabel("50")
+        threshold_row.addWidget(self.threshold_value_label)
+        controls_layout.addLayout(threshold_row)
 
-        # Feather slider (smooth blending region), as a percentage of 255.
+        # Feather slider row with numeric label.
+        feather_row = QHBoxLayout()
+        feather_desc = QLabel("Feather width (% of 255):")
+        feather_row.addWidget(feather_desc)
         self.feather_slider = QSlider(Qt.Horizontal)
         self.feather_slider.setRange(0, 100)
         self.feather_slider.setValue(10)
         self.feather_slider.setTickInterval(5)
         self.feather_slider.setTickPosition(QSlider.TicksBelow)
-        controls_layout.addWidget(QLabel("Feather width (% of 255):"), 3, 0)
-        controls_layout.addWidget(self.feather_slider, 3, 1)
+        self.feather_slider.valueChanged.connect(self.update_feather_label)
+        feather_row.addWidget(self.feather_slider)
+        self.feather_value_label = QLabel("10")
+        feather_row.addWidget(self.feather_value_label)
+        controls_layout.addLayout(feather_row)
 
-        # Two-step process buttons:
-        self.process_depth_button = QPushButton("Process Depth")
-        self.process_depth_button.clicked.connect(self.process_depth_only)
-        controls_layout.addWidget(self.process_depth_button, 1, 2)
-
+        # Process ChromoStereopsis button.
+        process_chromo_row = QHBoxLayout()
         self.process_chromo_button = QPushButton("Process ChromoStereopsis")
         self.process_chromo_button.clicked.connect(self.process_chromo)
-        controls_layout.addWidget(self.process_chromo_button, 2, 2)
+        process_chromo_row.addWidget(self.process_chromo_button)
+        controls_layout.addLayout(process_chromo_row)
 
         # Preview areas for three outputs.
         preview_group = QGroupBox("Previews")
@@ -149,6 +169,12 @@ class MainWindow(QMainWindow):
         preview_layout.addLayout(self.orig_preview["layout"])
         preview_layout.addLayout(self.depth_preview["layout"])
         preview_layout.addLayout(self.chromo_preview["layout"])
+
+    def update_threshold_label(self, value):
+        self.threshold_value_label.setText(str(value))
+
+    def update_feather_label(self, value):
+        self.feather_value_label.setText(str(value))
 
     def create_preview(self, title: str):
         layout = QVBoxLayout()
@@ -243,6 +269,25 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
+    # Apply Fusion style and a dark palette.
+    app.setStyle("Fusion")
+    dark_palette = QPalette()
+    dark_palette.setColor(QPalette.Window, QColor(53, 53, 53))
+    dark_palette.setColor(QPalette.WindowText, QColor(255, 255, 255))
+    dark_palette.setColor(QPalette.Base, QColor(42, 42, 42))
+    dark_palette.setColor(QPalette.AlternateBase, QColor(66, 66, 66))
+    dark_palette.setColor(QPalette.ToolTipBase, QColor(255, 255, 255))
+    dark_palette.setColor(QPalette.ToolTipText, QColor(255, 255, 255))
+    dark_palette.setColor(QPalette.Text, QColor(255, 255, 255))
+    dark_palette.setColor(QPalette.Button, QColor(53, 53, 53))
+    dark_palette.setColor(QPalette.ButtonText, QColor(255, 255, 255))
+    dark_palette.setColor(QPalette.BrightText, QColor(255, 0, 0))
+    dark_palette.setColor(QPalette.Link, QColor(208, 42, 218))
+    dark_palette.setColor(QPalette.Highlight, QColor(208, 42, 218))
+    dark_palette.setColor(QPalette.HighlightedText, QColor(0, 0, 0))
+    app.setPalette(dark_palette)
+
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
