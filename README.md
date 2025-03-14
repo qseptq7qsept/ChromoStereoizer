@@ -19,11 +19,11 @@ Generate Chromostereopsis images from Depth, using [Depth-Anything-V2](https://g
 ## Dependencies
 
 All dependencies required for this project are listed below and will be automatically installed using the install.bat provided :
-torch
-numpy
-pillow
-PySide6
-transformers
+torch,
+numpy,
+pillow,
+PySide6,
+transformers,
 A working Depth-Anything-V2 install
 
 ## Installation
