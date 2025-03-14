@@ -52,7 +52,7 @@ To run the project:
    Simply run `run.bat` from your command prompt or just double-click on it.
 
 ## Examples
-
+![1](examples/1.png) ![2](examples/2.png) ![3](examples/3.png)
 
 ## Pre-trained Models
 
