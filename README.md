@@ -30,8 +30,8 @@ A working Depth-Anything-V2 install
 
 ### Windows
 
-1. **Install Python 3.10.8 or Newer:**
-   [Python 3.10.8](https://www.python.org/downloads/release/python-3108/)
+1. **Install Python 3.10.10 or Newer:**
+   [Python 3.10.10](https://www.python.org/downloads/release/python-31010/)
 
 2. **Install Git:**
    [Git](https://git-scm.com/downloads)
