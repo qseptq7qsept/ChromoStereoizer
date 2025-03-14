@@ -5,7 +5,7 @@ import numpy as np
 from PIL import Image
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QPushButton, 
                                QVBoxLayout, QHBoxLayout, QFileDialog, QLabel, QLineEdit, 
-                               QMessageBox, QSlider, QGroupBox, QGridLayout)
+                               QMessageBox, QSlider, QGroupBox)
 from PySide6.QtGui import QPixmap, QImage, QPalette, QColor
 from PySide6.QtCore import Qt
 from transformers import AutoImageProcessor, AutoModelForDepthEstimation
@@ -35,32 +35,55 @@ def process_depth(image: Image.Image, image_processor, model, device):
     depth_img = Image.fromarray(depth.astype("uint8"))
     return depth_img
 
-def apply_chromo_stereopsis(original_img: Image.Image, depth_img: Image.Image, threshold: float, feather: float) -> Image.Image:
+def apply_chromo_stereopsis(
+    original_img: Image.Image,
+    depth_img: Image.Image,
+    threshold: float,
+    feather: float,
+    black_level: float,
+    white_level: float
+) -> Image.Image:
     """
-    Applies ChromoStereopsis processing:
-      - Convert original image to grayscale.
-      - For each pixel, compute a blending factor based on its depth value.
-         Let t = threshold, f = feather (both in 0-255).
-         If d <= t - f/2, blend = 0 (full blue);
-         if d >= t + f/2, blend = 1 (full red);
-         else, blend = (d - (t - f/2)) / f.
-      - The resulting pixel color = (blend * gray, 0, (1 - blend) * gray).
-    Returns a new RGB PIL Image.
+    Chromostereopsis with a "Levels" approach for grayscale:
+    
+    1) Convert original to grayscale (0..255).
+    2) Apply a levels adjustment:
+         adjusted_gray = clamp( (gray - black_level)/(white_level - black_level)*255 , 0..255 )
+    3) Convert adjusted_gray to [0..1] for color multiplication.
+    4) Compute blend from depth:
+         - blend=0 => fully blue
+         - blend=1 => fully red
+    5) Red channel = blend * adjusted_gray_01 * 255
+       Blue channel = (1 - blend) * adjusted_gray_01 * 255
+       Green channel = 0
     """
+    # 1) Convert to grayscale
     gray = np.array(original_img.convert("L"), dtype=np.float32)
-    depth_arr = np.array(depth_img, dtype=np.float32)
-    h, w = gray.shape
 
-    # Compute blending factor per pixel.
+    # 2) Levels adjustment
+    # Ensure we don't divide by zero if black_level == white_level
+    denom = (white_level - black_level) if (white_level > black_level) else 1e-6
+    adjusted_gray = (gray - black_level) / denom * 255.0
+    adjusted_gray = np.clip(adjusted_gray, 0, 255)
+
+    # Convert to [0..1] for color multiplication
+    adjusted_gray_01 = adjusted_gray / 255.0
+
+    # 3) Depth-based blend factor
+    depth_arr = np.array(depth_img, dtype=np.float32)
     half_feather = feather / 2.0
     blend = np.clip((depth_arr - (threshold - half_feather)) / (feather + 1e-6), 0, 1)
 
-    # Create output image: for each pixel, red channel = blend * gray, blue channel = (1 - blend) * gray.
-    output = np.zeros((h, w, 3), dtype=np.float32)
-    output[..., 0] = blend * gray   # Red channel
-    output[..., 2] = (1 - blend) * gray  # Blue channel
+    # 4) Red / Blue channels
+    red = blend * adjusted_gray_01 * 255.0
+    blue = (1.0 - blend) * adjusted_gray_01 * 255.0
 
-    output = np.clip(output, 0, 255).astype(np.uint8)
+    # Create the output image
+    h, w = gray.shape
+    output = np.zeros((h, w, 3), dtype=np.uint8)
+    output[..., 0] = np.clip(red, 0, 255).astype(np.uint8)
+    output[..., 2] = np.clip(blue, 0, 255).astype(np.uint8)
+
     return Image.fromarray(output, mode="RGB")
 
 def pil_to_pixmap(im: Image.Image, max_size=(300, 300)) -> QPixmap:
@@ -69,7 +92,6 @@ def pil_to_pixmap(im: Image.Image, max_size=(300, 300)) -> QPixmap:
     thumbnail = im.copy()
     thumbnail.thumbnail(max_size, Image.Resampling.LANCZOS)
     data = thumbnail.tobytes("raw", "RGB")
-    # Compute bytes per line: width * 3 (for RGB)
     bytes_per_line = thumbnail.width * 3
     qimg = QImage(data, thumbnail.width, thumbnail.height, bytes_per_line, QImage.Format_RGB888)
     return QPixmap.fromImage(qimg)
@@ -77,13 +99,14 @@ def pil_to_pixmap(im: Image.Image, max_size=(300, 300)) -> QPixmap:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("ChromoStereoizer v1.1 -q7")
+        self.setWindowTitle("ChromoStereoizer - v1.2 -q7")
         self.resize(1200, 800)
 
         self.image_processor, self.model, self.device = load_model("vitl")
         self.output_folder = None
-        self.original_img = None  # Loaded image
-        self.depth_img = None     # Depth map
+        self.original_img = None
+        self.depth_img = None
+        self.chromo_img = None
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -95,7 +118,7 @@ class MainWindow(QMainWindow):
         controls_group.setLayout(controls_layout)
         main_layout.addWidget(controls_group)
 
-        # Top row for buttons and output folder info.
+        # Row 1: select image, select folder
         top_row = QHBoxLayout()
         self.select_button = QPushButton("Select Input Image")
         self.select_button.clicked.connect(self.select_image)
@@ -109,18 +132,14 @@ class MainWindow(QMainWindow):
         top_row.addWidget(self.folder_label)
         controls_layout.addLayout(top_row)
 
-        # Filename input and Process Depth button.
+        # Row 2: filename
         row_two = QHBoxLayout()
         self.filename_edit = QLineEdit()
         self.filename_edit.setPlaceholderText("Enter output file name (without extension)")
         row_two.addWidget(self.filename_edit)
-
-        self.process_depth_button = QPushButton("Process Depth")
-        self.process_depth_button.clicked.connect(self.process_depth_only)
-        row_two.addWidget(self.process_depth_button)
         controls_layout.addLayout(row_two)
 
-        # Threshold slider row with numeric label.
+        # Threshold slider
         threshold_row = QHBoxLayout()
         threshold_desc = QLabel("Median threshold (% of 255):")
         threshold_row.addWidget(threshold_desc)
@@ -130,12 +149,13 @@ class MainWindow(QMainWindow):
         self.threshold_slider.setTickInterval(10)
         self.threshold_slider.setTickPosition(QSlider.TicksBelow)
         self.threshold_slider.valueChanged.connect(self.update_threshold_label)
+        self.threshold_slider.valueChanged.connect(lambda _: self.update_chromo_preview())
         threshold_row.addWidget(self.threshold_slider)
         self.threshold_value_label = QLabel("50")
         threshold_row.addWidget(self.threshold_value_label)
         controls_layout.addLayout(threshold_row)
 
-        # Feather slider row with numeric label.
+        # Feather slider
         feather_row = QHBoxLayout()
         feather_desc = QLabel("Feather width (% of 255):")
         feather_row.addWidget(feather_desc)
@@ -145,19 +165,52 @@ class MainWindow(QMainWindow):
         self.feather_slider.setTickInterval(5)
         self.feather_slider.setTickPosition(QSlider.TicksBelow)
         self.feather_slider.valueChanged.connect(self.update_feather_label)
+        self.feather_slider.valueChanged.connect(lambda _: self.update_chromo_preview())
         feather_row.addWidget(self.feather_slider)
         self.feather_value_label = QLabel("10")
         feather_row.addWidget(self.feather_value_label)
         controls_layout.addLayout(feather_row)
 
-        # Process ChromoStereopsis button.
+        # Black Level slider (0..255)
+        black_row = QHBoxLayout()
+        black_desc = QLabel("Black Level (Default = 0):")
+        black_row.addWidget(black_desc)
+        self.black_slider = QSlider(Qt.Horizontal)
+        self.black_slider.setRange(0, 255)
+        self.black_slider.setValue(0)
+        self.black_slider.setTickInterval(16)
+        self.black_slider.setTickPosition(QSlider.TicksBelow)
+        self.black_slider.valueChanged.connect(self.update_black_label)
+        self.black_slider.valueChanged.connect(lambda _: self.update_chromo_preview())
+        black_row.addWidget(self.black_slider)
+        self.black_value_label = QLabel("0")
+        black_row.addWidget(self.black_value_label)
+        controls_layout.addLayout(black_row)
+
+        # White Level slider (0..255)
+        white_row = QHBoxLayout()
+        white_desc = QLabel("White Level (Default = 255):")
+        white_row.addWidget(white_desc)
+        self.white_slider = QSlider(Qt.Horizontal)
+        self.white_slider.setRange(0, 255)
+        self.white_slider.setValue(255)
+        self.white_slider.setTickInterval(16)
+        self.white_slider.setTickPosition(QSlider.TicksBelow)
+        self.white_slider.valueChanged.connect(self.update_white_label)
+        self.white_slider.valueChanged.connect(lambda _: self.update_chromo_preview())
+        white_row.addWidget(self.white_slider)
+        self.white_value_label = QLabel("255")
+        white_row.addWidget(self.white_value_label)
+        controls_layout.addLayout(white_row)
+
+        # Save Chromostereopsis
         process_chromo_row = QHBoxLayout()
-        self.process_chromo_button = QPushButton("Process ChromoStereopsis")
-        self.process_chromo_button.clicked.connect(self.process_chromo)
+        self.process_chromo_button = QPushButton("Save Chromostereopsis")
+        self.process_chromo_button.clicked.connect(self.save_chromo)
         process_chromo_row.addWidget(self.process_chromo_button)
         controls_layout.addLayout(process_chromo_row)
 
-        # Preview areas for three outputs.
+        # Preview group
         preview_group = QGroupBox("Previews")
         preview_layout = QHBoxLayout()
         preview_group.setLayout(preview_layout)
@@ -176,11 +229,16 @@ class MainWindow(QMainWindow):
     def update_feather_label(self, value):
         self.feather_value_label.setText(str(value))
 
+    def update_black_label(self, value):
+        self.black_value_label.setText(str(value))
+
+    def update_white_label(self, value):
+        self.white_value_label.setText(str(value))
+
     def create_preview(self, title: str):
         layout = QVBoxLayout()
         label = QLabel(title)
         image_label = QLabel()
-        # Do not force scaling; the thumbnail is already appropriately sized.
         image_label.setScaledContents(False)
         layout.addWidget(label)
         layout.addWidget(image_label)
@@ -207,60 +265,63 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Could not open image:\n{e}")
             self.original_img = None
             return
-        # Show original image preview using a thumbnail copy.
+
         self.orig_preview["image_label"].setPixmap(pil_to_pixmap(self.original_img))
         self.orig_preview["image_label"].adjustSize()
-        # Clear previous previews.
+
         self.depth_preview["image_label"].clear()
         self.chromo_preview["image_label"].clear()
         self.depth_img = None
+        self.chromo_img = None
 
-    def process_depth_only(self):
-        if self.original_img is None:
-            QMessageBox.warning(self, "No Image", "Please select an input image first.")
-            return
-        try:
-            # Process using the full-resolution image.
-            self.depth_img = process_depth(self.original_img, self.image_processor, self.model, self.device)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Depth estimation failed:\n{e}")
-            return
-        # For preview, display a thumbnail version.
-        self.depth_preview["image_label"].setPixmap(pil_to_pixmap(self.depth_img.convert("RGB")))
-        self.depth_preview["image_label"].adjustSize()
+        self.update_chromo_preview()
 
-    def process_chromo(self):
+    def update_chromo_preview(self):
         if self.original_img is None:
-            QMessageBox.warning(self, "No Image", "Please select an input image first.")
+            self.chromo_preview["image_label"].clear()
+            self.chromo_img = None
             return
-        # Ensure depth has been processed; if not, process it.
+
         if self.depth_img is None:
             try:
                 self.depth_img = process_depth(self.original_img, self.image_processor, self.model, self.device)
+                self.depth_preview["image_label"].setPixmap(pil_to_pixmap(self.depth_img.convert("RGB")))
+                self.depth_preview["image_label"].adjustSize()
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Depth estimation failed:\n{e}")
                 return
 
-        # Get threshold from slider (as percentage of 255).
         threshold = (self.threshold_slider.value() / 100.0) * 255
-        # Get feather width from slider (as percentage of 255).
         feather = (self.feather_slider.value() / 100.0) * 255
+        black_level = float(self.black_slider.value())
+        white_level = float(self.white_slider.value())
 
         try:
-            chromo_img = apply_chromo_stereopsis(self.original_img, self.depth_img, threshold, feather)
+            self.chromo_img = apply_chromo_stereopsis(
+                self.original_img,
+                self.depth_img,
+                threshold,
+                feather,
+                black_level,
+                white_level
+            )
         except Exception as e:
             QMessageBox.critical(self, "Error", f"ChromoStereopsis processing failed:\n{e}")
+            self.chromo_img = None
             return
 
-        self.chromo_preview["image_label"].setPixmap(pil_to_pixmap(chromo_img))
+        self.chromo_preview["image_label"].setPixmap(pil_to_pixmap(self.chromo_img))
         self.chromo_preview["image_label"].adjustSize()
 
-        # Save processed chromo image if output folder is selected.
+    def save_chromo(self):
+        if self.chromo_img is None:
+            QMessageBox.warning(self, "No Processed Image", "ChromoStereopsis preview not available.")
+            return
         if self.output_folder:
             base_name = self.filename_edit.text().strip() or "processed_image"
             out_path = os.path.join(self.output_folder, base_name + ".png")
             try:
-                chromo_img.save(out_path)
+                self.chromo_img.save(out_path)
                 QMessageBox.information(self, "Saved", f"Processed image saved to:\n{out_path}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to save processed image:\n{e}")
@@ -269,9 +330,9 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-
-    # Apply Fusion style and a dark palette.
     app.setStyle("Fusion")
+
+    # Simple dark palette
     dark_palette = QPalette()
     dark_palette.setColor(QPalette.Window, QColor(53, 53, 53))
     dark_palette.setColor(QPalette.WindowText, QColor(255, 255, 255))
