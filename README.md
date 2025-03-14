@@ -51,6 +51,9 @@ To run the project:
 1. **Execute the Run Script:**  
    Simply run `run.bat` from your command prompt or just double-click on it.
 
+## Examples
+![1](examples/1.png) ![2](examples/2.png) ![3](examples/3.png)
+
 ## Pre-trained Models
 
 For more details on pre-trained models used in this project, please refer to the [Depth-Anything-V2 pre-trained models section](https://github.com/DepthAnything/Depth-Anything-V2?tab=readme-ov-file#pre-trained-models).
